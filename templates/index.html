@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Crawler</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --accent: #4FC3F7;
+            --accent-glow: rgba(79, 195, 247, 0.4);
+            --bg-dark: #0F172A;
+            --text: #F8FAFC;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: radial-gradient(circle at top right, #1E293B, #0F172A);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .logo {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .logo span {
+            color: #fff;
+        }
+
+        /* Glass Cards */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glass-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Grid Layout */
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 2rem;
+        }
+
+        /* Sidebar Controls */
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            color: #94A3B8;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        textarea {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            padding: 0.8rem;
+            color: #fff;
+            margin-bottom: 1.5rem;
+            font-family: inherit;
+        }
+
+        input:focus {
+            border-color: var(--accent);
+            outline: none;
+        }
+
+        /* Buttons */
+        .btn {
+            background: var(--accent);
+            color: #0F172A;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .btn:hover {
+            background: #fff;
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        /* Pipeline Steps */
+        .step {
+            opacity: 0.5;
+            transition: opacity 0.5s;
+            cursor: not-allowed;
+        }
+
+        .step.active {
+            opacity: 1;
+            cursor: default;
+        }
+
+        /* Results area */
+        .results-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .video-card {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 15px;
+            padding: 1rem;
+            border: 1px solid var(--glass-border);
+        }
+
+        .status-badge {
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .status-passed {
+            background: #059669;
+            color: #ECFDF5;
+        }
+
+        .status-failed {
+            background: #DC2626;
+            color: #FEF2F2;
+        }
+
+        /* Progress Bar */
+        .progress-wrapper {
+            margin-top: 1rem;
+            background: rgba(255, 255, 255, 0.1);
+            height: 10px;
+            border-radius: 5px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .progress-bar {
+            background: var(--accent);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        /* Visual Plot */
+        .plot-img {
+            width: 100%;
+            border-radius: 10px;
+            margin-top: 1rem;
+            border: 1px solid var(--glass-border);
+        }
+
+        /* Modal / Explorer Overlay */
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(20px);
+            z-index: 1000;
+            padding: 3rem;
+            display: none;
+            overflow-y: auto;
+        }
+
+        .explorer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 1rem;
+        }
+
+        .search-box {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 0.8rem 1.5rem;
+            color: #fff;
+            width: 300px;
+            font-family: inherit;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">DATA<span>CRAWLER</span></div>
+            <div id="connection-status"><i class="fas fa-circle-notch fa-spin"></i> Connecting...</div>
+        </header>
+
+        <div class="grid">
+            <!-- Sidebar: Query Setup -->
+            <aside>
+                <div class="glass-card">
+                    <h3><i class="fas fa-folder-open"></i> 1. Load Queries</h3>
+                    <p style="font-size: 0.8rem; color: #94A3B8; margin-bottom: 1.5rem;">Upload folders containing your
+                        sample videos.</p>
+
+                    <label>AI Model Type</label>
+                    <select id="model_type" style="width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--glass-border); border-radius: 8px; padding: 0.8rem; color: #fff; margin-bottom: 1.5rem; font-family: inherit;">
+                        <option value="clip">OpenAI CLIP (Base)</option>
+                        <option value="siglip">Google SigLIP (Base)</option>
+                        <option value="openclip">OpenCLIP (LAION-DataComp)</option>
+                        <option value="dinov2">Meta DINOv2 (Visual Only)</option>
+                    </select>
+
+                    <label>Query Sampling Size (frames/video)</label>
+                    <input type="number" id="sampling_size" value="5" min="1" max="50">
+
+                    <button class="btn btn-secondary" onclick="document.getElementById('folder_input').click()">
+                        <i class="fas fa-upload"></i> Upload Folders
+                    </button>
+                    <input type="file" id="folder_input" webkitdirectory directory multiple style="display:none">
+
+                    <div id="upload-status" style="margin-top: 1rem; font-size: 0.8rem; color: var(--accent);"></div>
+                </div>
+
+                <div class="glass-card" id="report-card" style="display: none;">
+                    <details>
+                        <summary style="cursor: pointer; font-weight: 600; color: var(--accent);">
+                            <i class="fas fa-chart-bar"></i> Similarity Report
+                        </summary>
+                        <div id="matrix-report" style="margin-top: 1rem; font-size: 0.75rem;">
+                            <!-- Matrix will be rendered here -->
+                        </div>
+                    </details>
+                </div>
+
+                <div class="glass-card">
+                    <h3><i class="fas fa-cog"></i> 2. Settings</h3>
+                    <br>
+                    <label>Match Threshold</label>
+                    <input type="number" id="threshold" step="0.01" value="0.82">
+
+                    <label>Video Limit</label>
+                    <input type="number" id="limit" value="5">
+                </div>
+            </aside>
+
+            <!-- Main Panel: Workflow -->
+            <main>
+                <div class="glass-card step active" id="search-section">
+                    <h3><i class="fas fa-rocket"></i> 3. Launch Crawler</h3>
+                    <p style="color: #94A3B8; margin-bottom: 1.5rem;">The AI has generated the following search query
+                        based on your samples.</p>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <label style="margin-bottom: 0;">YouTube Search Query</label>
+                        <button id="btn-gen-prompt" class="btn btn-secondary" style="width: auto; padding: 0.4rem 0.8rem; font-size: 0.75rem;">
+                            <i class="fas fa-magic"></i> Generate AI Search Prompt
+                        </button>
+                    </div>
+                    <textarea id="search_prompt" rows="3" placeholder="Enter query here or click generate..."></textarea>
+
+                    <button id="btn-start-crawl" class="btn">
+                        <i class="fas fa-play"></i> Start Search & Extraction
+                    </button>
+
+                    <div id="main-progress-wrapper" class="progress-wrapper">
+                        <div id="main-progress-bar" class="progress-bar"></div>
+                    </div>
+                    <p id="status-msg"
+                        style="margin-top: 1rem; font-family: monospace; font-size: 0.85rem; color: var(--accent);"></p>
+                </div>
+
+                <!-- Step 2: Live Monitoring & Results -->
+                <div class="glass-card">
+                    <h3><i class="fas fa-list-check"></i> Crawler Results</h3>
+                    <br>
+                    <div id="results-area" class="results-container">
+                        <p style="color: #64748B;">No data yet. Launch the crawler to see results.</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Results Explorer Overlay -->
+    <div id="explorer-overlay" class="overlay">
+        <div class="explorer-header">
+            <div>
+                <h2 style="color: var(--accent);"><i class="fas fa-layer-group"></i> CLIP LIBRARY</h2>
+                <p id="explorer-stats" style="color: #94A3B8; font-size: 0.9rem;"></p>
+            </div>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <input type="text" id="explorer-search" class="search-box" placeholder="Search by video title...">
+                <button class="btn btn-secondary" onclick="closeExplorer()" style="width: auto; padding: 0.8rem 1.5rem;">
+                    <i class="fas fa-times"></i> Close
+                </button>
+            </div>
+        </div>
+        <div id="explorer-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1.5rem;">
+            <!-- Clips will be rendered here -->
+        </div>
+    </div>
+
+    <!-- Timeline Explorer Overlay -->
+    <div id="timeline-overlay" class="overlay">
+        <div class="explorer-header">
+            <div>
+                <h2 style="color: var(--accent);"><i class="fas fa-chart-line"></i> MATCH TIMELINES</h2>
+                <p id="timeline-stats" style="color: #94A3B8; font-size: 0.9rem;"></p>
+            </div>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <input type="text" id="timeline-search" class="search-box" placeholder="Search videos...">
+                <button class="btn btn-secondary" onclick="closeTimelineExplorer()" style="width: auto; padding: 0.8rem 1.5rem;">
+                    <i class="fas fa-times"></i> Close
+                </button>
+            </div>
+        </div>
+        <div id="timeline-grid" style="display: grid; grid-template-columns: 1fr; gap: 2rem;">
+            <!-- Plots will be rendered here -->
+        </div>
+    </div>
+
+    <!-- Caption Selector Overlay -->
+    <div id="caption-overlay" class="overlay">
+        <div class="glass-card" style="max-width: 600px; margin: 10% auto; padding: 2rem;">
+            <h3 style="color: var(--accent); margin-bottom: 1.5rem;"><i class="fas fa-magic"></i> Select Best Description</h3>
+            <p style="color: #94A3B8; margin-bottom: 1.5rem; font-size: 0.9rem;">The AI generated multiple descriptions from your samples. Pick the one that best describes what you want to find.</p>
+            <div id="caption-list" style="display: flex; flex-direction: column; gap: 1rem;">
+                <!-- Candidates will be rendered here -->
+            </div>
+            <button class="btn btn-secondary" onclick="closeCaptionSelector()" style="margin-top: 1.5rem; width: 100%;">Cancel</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const folderInput = document.getElementById('folder_input');
+        const uploadStatus = document.getElementById('upload-status');
+        const reportCard = document.getElementById('report-card');
+        const matrixArea = document.getElementById('matrix-report');
+        const btnStart = document.getElementById('btn-start-crawl');
+        const btnGenPrompt = document.getElementById('btn-gen-prompt');
+        const promptArea = document.getElementById('search_prompt');
+        const thresholdInput = document.getElementById('threshold');
+        const limitInput = document.getElementById('limit');
+        const samplingInput = document.getElementById('sampling_size');
+        const modelTypeInput = document.getElementById('model_type');
+        const statusMsg = document.getElementById('status-msg');
+        const progressBar = document.getElementById('main-progress-bar');
+        const progressWrapper = document.getElementById('main-progress-wrapper');
+        const resultsArea = document.getElementById('results-area');
+        
+        const explorerOverlay = document.getElementById('explorer-overlay');
+        const explorerGrid = document.getElementById('explorer-grid');
+        const explorerSearch = document.getElementById('explorer-search');
+        const explorerStats = document.getElementById('explorer-stats');
+
+        const timelineOverlay = document.getElementById('timeline-overlay');
+        const timelineGrid = document.getElementById('timeline-grid');
+        const timelineSearch = document.getElementById('timeline-search');
+        const timelineStats = document.getElementById('timeline-stats');
+
+        const captionOverlay = document.getElementById('caption-overlay');
+        const captionList = document.getElementById('caption-list');
+
+        let currentResults = [];
+
+        socket.on('connect', () => {
+            document.getElementById('connection-status').innerHTML = '<i class="fas fa-circle" style="color: #10B981;"></i> Connected';
+        });
+
+        // Pipeline Updates via SocketIO
+        socket.on('pipeline_update', (data) => {
+            statusMsg.innerText = `[${data.status.toUpperCase()}] ${data.msg}`;
+
+            if (data.status !== 'idle') {
+                progressWrapper.style.display = 'block';
+                progressBar.style.width = data.progress + '%';
+            } else {
+                progressWrapper.style.display = 'none';
+            }
+
+            if (data.results && data.results.length > 0) {
+                currentResults = data.results;
+                renderResults(data.results);
+            }
+        });
+
+        // Folder Upload & Auto-Process (XHR for progress)
+        folderInput.onchange = () => {
+            const files = folderInput.files;
+            if (!files.length) return;
+
+            const formData = new FormData();
+            formData.append('sampling_size', samplingInput.value);
+            formData.append('model_type', modelTypeInput.value);
+            for (let file of files) {
+                formData.append('files', file, file.webkitRelativePath || file.name);
+            }
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/upload_query_folders', true);
+
+            // Show progress bar
+            progressWrapper.style.display = 'block';
+            progressBar.style.width = '0%';
+            statusMsg.innerText = "Starting upload...";
+
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = percent + '%';
+                    statusMsg.innerText = `Uploading videos... ${percent}%`;
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    const data = JSON.parse(xhr.responseText);
+                    if (data.report) {
+                        thresholdInput.value = data.report.recommended_threshold;
+                        renderSummaryReport(data.report);
+                        reportCard.style.display = 'block';
+                    }
+                    statusMsg.innerText = "Upload & Sampling complete. Click 'Generate AI Search Prompt' below.";
+                    progressWrapper.style.display = 'none';
+                } else {
+                    statusMsg.innerText = `Upload Error (${xhr.status}): ${xhr.responseText.substring(0, 100)}`;
+                }
+            };
+
+            xhr.onerror = () => {
+                statusMsg.innerText = "Network Error during upload.";
+            };
+
+            xhr.send(formData);
+        };
+
+        function renderSummaryReport(report) {
+            const { thumbnails, max_sim, min_sim, mean_sim, recommended_threshold } = report;
+            let html = `
+                <div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 10px; border: 1px solid var(--glass-border);">
+                    <p style="margin-bottom: 0.8rem; color: var(--accent); font-weight: bold; font-size: 0.9rem;">
+                        <i class="fas fa-microchip"></i> Concept Analysis
+                    </p>
+                    <ul style="list-style: none; font-size: 0.8rem; line-height: 1.6; margin-bottom: 1rem;">
+                        <li style="display: flex; justify-content: space-between;"><span>Max Sim:</span> <b>${max_sim.toFixed(3)}</b></li>
+                        <li style="display: flex; justify-content: space-between;"><span>Min Sim:</span> <b>${min_sim.toFixed(3)}</b></li>
+                        <li style="display: flex; justify-content: space-between;"><span>Mean Sim:</span> <b>${mean_sim.toFixed(3)}</b></li>
+                    </ul>
+
+                    <div style="position: relative; overflow: hidden; border-radius: 8px; border: 1px solid var(--glass-border); background: #000;">
+                        <div id="query-carousel" style="display: flex; transition: transform 0.5s ease; width: 100%;">
+                            ${thumbnails.map((t, i) => `
+                                <div style="width: 100%; aspect-ratio: 16/9; flex-shrink: 0; position: relative;">
+                                    <img src="${t}?t=${Date.now()}" style="width: 100%; height: 100%; object-fit: cover;">
+                                    <div style="position: absolute; bottom: 0; left: 0; padding: 0.5rem; background: rgba(0,0,0,0.6); color: var(--accent); font-size: 0.65rem; font-weight: bold; border-top-right-radius: 4px;">
+                                        ${report.distinct_names[i]}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        ${thumbnails.length > 1 ? `
+                        <button onclick="shiftCarousel(-1)" style="position: absolute; left: 0; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.5); border: none; color: #fff; cursor: pointer; padding: 0.5rem; z-index: 10;"><i class="fas fa-chevron-left"></i></button>
+                        <button onclick="shiftCarousel(1)" style="position: absolute; right: 0; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.5); border: none; color: #fff; cursor: pointer; padding: 0.5rem; z-index: 10;"><i class="fas fa-chevron-right"></i></button>
+                        ` : '' }
+                    </div>
+                    
+                    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--glass-border);">
+                        <p style="font-size: 0.85rem; color: #fff; margin-bottom: 0.5rem;">
+                            Recommended Threshold: <span style="color: var(--accent); font-weight: bold; font-size: 1.1rem;">${recommended_threshold}</span>
+                        </p>
+                        ${report.trends && report.trends.length > 0 ? `
+                        <div style="background: rgba(255,255,255,0.03); padding: 0.6rem; border-radius: 6px; border: 1px solid var(--glass-border);">
+                            <span style="font-size: 0.7rem; color: #94A3B8; display: block; margin-bottom: 0.3rem; text-transform: uppercase;">Detected Keywords (AI Summary)</span>
+                            <p style="margin: 0; font-size: 0.8rem; color: var(--accent); letter-spacing: 0.5px;">${report.trends.join(', ')}</p>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+            matrixArea.innerHTML = html;
+        }
+
+        let carouselIdx = 0;
+        function shiftCarousel(dir) {
+            const carousel = document.getElementById('query-carousel');
+            const total = carousel.children.length;
+            carouselIdx = (carouselIdx + dir + total) % total;
+            carousel.style.transform = `translateX(-${carouselIdx * 100}%)`;
+        }
+
+        // Generate AI Search Prompt
+        btnGenPrompt.onclick = async () => {
+            btnGenPrompt.disabled = true;
+            btnGenPrompt.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+            
+            try {
+                const resp = await fetch('/api/generate_search_prompt', { method: 'POST' });
+                const data = await resp.json();
+                
+                if (data.candidates && data.candidates.length > 0) {
+                    openCaptionSelector(data.candidates);
+                } else if (data.error) {
+                    alert("Error generating prompt: " + data.error);
+                }
+            } catch (e) {
+                console.error(e);
+            } finally {
+                btnGenPrompt.disabled = false;
+                btnGenPrompt.innerHTML = '<i class="fas fa-magic"></i> Generate AI Search Prompt';
+            }
+        };
+
+        function openCaptionSelector(candidates) {
+            captionList.innerHTML = '';
+            candidates.forEach(cap => {
+                const btn = document.createElement('div');
+                btn.className = 'glass-card';
+                btn.style.cssText = 'cursor: pointer; padding: 1.2rem; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border); transition: all 0.2s;';
+                btn.innerHTML = `<p style="margin: 0;">${cap}</p>`;
+                
+                btn.onmouseover = () => btn.style.borderColor = 'var(--accent)';
+                btn.onmouseout = () => btn.style.borderColor = 'var(--glass-border)';
+                
+                btn.onclick = () => {
+                    promptArea.value = cap;
+                    closeCaptionSelector();
+                };
+                captionList.appendChild(btn);
+            });
+            captionOverlay.style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeCaptionSelector() {
+            captionOverlay.style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        // Search & Launch
+        btnStart.onclick = async () => {
+            const body = {
+                query: promptArea.value,
+                limit: parseInt(limitInput.value),
+                threshold: parseFloat(thresholdInput.value),
+                fps: 2.0 // Default or hidden
+            };
+            resultsArea.innerHTML = '<p>Initiating crawler pipeline...</p>';
+            await fetch('/api/start_crawl', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+        };
+
+        function renderResults(results) {
+            resultsArea.innerHTML = '';
+            let totalClips = 0;
+            results.forEach(r => totalClips += r.segments);
+
+            const summaryCard = document.createElement('div');
+            summaryCard.className = 'glass-card';
+            summaryCard.style.cssText = 'width: 100%; border: 1px solid var(--accent); background: rgba(79, 195, 247, 0.05);';
+            summaryCard.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 2rem; align-items: center;">
+                    <div style="text-align: center;">
+                        <p style="color: #94A3B8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;">Videos Processed</p>
+                        <h2 style="color: #fff; font-size: 2.2rem; margin: 0.5rem 0;">${results.length}</h2>
+                    </div>
+                    <div style="text-align: center;">
+                        <p style="color: #94A3B8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;">Clips Extracted</p>
+                        <h2 style="color: var(--accent); font-size: 2.2rem; margin: 0.5rem 0;">${totalClips}</h2>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 0.8rem;">
+                        <button class="btn" onclick="openExplorer()" style="padding: 0.8rem 1rem; width: 100%;">
+                            <i class="fas fa-th-large"></i> Browse Clip Library
+                        </button>
+                        <button class="btn btn-secondary" onclick="openTimelineExplorer()" style="padding: 0.8rem 1rem; width: 100%; border: 1px solid var(--glass-border);">
+                            <i class="fas fa-chart-line"></i> Confidence Timelines
+                        </button>
+                    </div>
+                </div>
+            `;
+            resultsArea.appendChild(summaryCard);
+        }
+
+        function openExplorer() {
+            explorerOverlay.style.display = 'block';
+            document.body.style.overflow = 'hidden';
+            renderExplorer();
+        }
+
+        function closeExplorer() {
+            explorerOverlay.style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        explorerSearch.oninput = () => renderExplorer();
+
+        function renderExplorer() {
+            const filter = explorerSearch.value.toLowerCase();
+            explorerGrid.innerHTML = '';
+            
+            const clips = [];
+            currentResults.forEach(r => {
+                if (r.title.toLowerCase().includes(filter)) {
+                    r.clips.forEach((c, i) => clips.push({ url: c, video: r.title, index: i+1 }));
+                }
+            });
+
+            explorerStats.innerText = `Showing ${clips.length} clips from filtered results`;
+
+            clips.forEach(clip => {
+                const item = document.createElement('a');
+                item.href = clip.url;
+                item.target = '_blank';
+                item.className = 'video-card';
+                item.style.textDecoration = 'none';
+                item.style.display = 'block';
+                item.innerHTML = `
+                    <div style="position: relative; aspect-ratio: 16/9; background: #000; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 0.8rem;">
+                        <i class="fas fa-play" style="color: var(--accent); font-size: 1.5rem; opacity: 0.8;"></i>
+                    </div>
+                    <p style="font-size: 0.75rem; color: #fff; margin-bottom: 0.2rem; font-weight: 600;">Clip ${clip.index}</p>
+                    <p style="font-size: 0.65rem; color: #94A3B8; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;" title="${clip.video}">${clip.video}</p>
+                `;
+                explorerGrid.appendChild(item);
+            });
+        }
+
+        function openTimelineExplorer() {
+            timelineOverlay.style.display = 'block';
+            document.body.style.overflow = 'hidden';
+            renderTimelineExplorer();
+        }
+
+        function closeTimelineExplorer() {
+            timelineOverlay.style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        timelineSearch.oninput = () => renderTimelineExplorer();
+
+        function renderTimelineExplorer() {
+            const filter = timelineSearch.value.toLowerCase();
+            timelineGrid.innerHTML = '';
+            
+            const matches = currentResults.filter(r => r.title.toLowerCase().includes(filter));
+            timelineStats.innerText = `Showing timelines for ${matches.length} videos`;
+
+            matches.forEach(res => {
+                const card = document.createElement('div');
+                card.className = 'glass-card';
+                card.style.background = 'rgba(255,255,255,0.02)';
+                card.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h4 style="color: var(--accent);">${res.title}</h4>
+                        <span class="status-badge ${res.status === 'passed' ? 'status-passed' : 'status-failed'}">${res.status}</span>
+                    </div>
+                    <p style="font-size: 0.8rem; color: #94A3B8;">Matches: ${res.segments}</p>
+                    <img src="${res.plot}?t=${Date.now()}" style="width: 100%; border-radius: 10px; margin-top: 1rem; border: 1px solid var(--glass-border);">
+                `;
+                timelineGrid.appendChild(card);
+            });
+        }
+    </script>
+</body>
+
+</html>

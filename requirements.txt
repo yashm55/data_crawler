@@ -1,0 +1,12 @@
+opencv-python
+torch
+torchvision
+transformers
+numpy
+matplotlib
+scikit-learn
+Pillow
+tqdm
+streamlit
+sentencepiece
+protobuf
