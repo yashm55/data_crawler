@@ -244,6 +244,20 @@
             <div id="connection-status"><i class="fas fa-circle-notch fa-spin"></i> Connecting...</div>
         </header>
 
+        <!-- Session Bar -->
+        <div class="glass-card" style="display: flex; align-items: center; justify-content: space-between; padding: 1rem 2rem; margin-bottom: 2rem;">
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <i class="fas fa-layer-group" style="color: var(--accent);"></i>
+                <select id="session_select" onchange="switchSession()" style="background: rgba(0,0,0,0.5); border: 1px solid var(--glass-border); padding: 0.8rem; color: #fff; border-radius: 8px; width: 300px; font-family: inherit;">
+                    <option value="">-- Loading Sessions --</option>
+                </select>
+            </div>
+            <div style="display: flex; gap: 1rem;">
+                <button class="btn btn-secondary" onclick="createNewSession()" style="padding: 0.5rem 1rem; width: auto;"><i class="fas fa-plus"></i> New Session</button>
+                <button class="btn" style="background: rgba(220, 38, 38, 0.2); color: #FCA5A5; padding: 0.5rem 1rem; width: auto; border: 1px solid rgba(220, 38, 38, 0.3);" onclick="deleteSession()"><i class="fas fa-trash"></i> Delete Session</button>
+            </div>
+        </div>
+
         <div class="grid">
             <!-- Sidebar: Query Setup -->
             <aside>
@@ -263,10 +277,20 @@
                     <label>Query Sampling Size (frames/video)</label>
                     <input type="number" id="sampling_size" value="5" min="1" max="50">
 
-                    <button class="btn btn-secondary" onclick="document.getElementById('folder_input').click()">
-                        <i class="fas fa-upload"></i> Upload Folders
-                    </button>
+                    <div id="query-pool-indicator" style="margin-bottom: 0.5rem; font-size: 0.8rem; color: #94A3B8;">Videos Uploaded: 0</div>
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <button class="btn btn-secondary" id="btn-upload-query" onclick="document.getElementById('folder_input').click()" style="flex: 2;">
+                            <i class="fas fa-upload"></i> Upload / Append Videos
+                        </button>
+                        <button class="btn btn-secondary" id="btn-resample-pool" style="flex: 1;" onclick="resamplePool()">
+                            <i class="fas fa-camera"></i> Resample
+                        </button>
+                    </div>
                     <input type="file" id="folder_input" webkitdirectory directory multiple style="display:none">
+                    
+                    <button class="btn btn-secondary" id="btn-regen-embeddings" onclick="regenerateEmbeddings()" style="margin-top: 0.5rem;">
+                        <i class="fas fa-sync-alt"></i> Regenerate Embeddings
+                    </button>
 
                     <div id="upload-status" style="margin-top: 1rem; font-size: 0.8rem; color: var(--accent);"></div>
                 </div>
@@ -308,9 +332,14 @@
                     </div>
                     <textarea id="search_prompt" rows="3" placeholder="Enter query here or click generate..."></textarea>
 
-                    <button id="btn-start-crawl" class="btn">
-                        <i class="fas fa-play"></i> Start Search & Extraction
-                    </button>
+                    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+                        <button id="btn-start-crawl" class="btn">
+                            <i class="fas fa-play"></i> Start Search & Extraction
+                        </button>
+                        <button id="btn-resume-crawl" class="btn btn-secondary" style="border: 1px solid var(--accent); color: var(--accent);">
+                            <i class="fas fa-play-circle"></i> Resume Unprocessed
+                        </button>
+                    </div>
 
                     <div id="main-progress-wrapper" class="progress-wrapper">
                         <div id="main-progress-bar" class="progress-bar"></div>
@@ -389,7 +418,12 @@
         const reportCard = document.getElementById('report-card');
         const matrixArea = document.getElementById('matrix-report');
         const btnStart = document.getElementById('btn-start-crawl');
+        const btnResume = document.getElementById('btn-resume-crawl');
         const btnGenPrompt = document.getElementById('btn-gen-prompt');
+        const btnUploadQuery = document.getElementById('btn-upload-query');
+        const btnResamplePool = document.getElementById('btn-resample-pool');
+        const btnRegenEmbeddings = document.getElementById('btn-regen-embeddings');
+        const queryPoolIndicator = document.getElementById('query-pool-indicator');
         const promptArea = document.getElementById('search_prompt');
         const thresholdInput = document.getElementById('threshold');
         const limitInput = document.getElementById('limit');
@@ -400,6 +434,33 @@
         const progressWrapper = document.getElementById('main-progress-wrapper');
         const resultsArea = document.getElementById('results-area');
         
+        // Settings Sync
+        async function syncSettings(payload) {
+            if (!activeSessionId) return;
+            await fetch(`/api/sessions/${activeSessionId}/update_settings`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        }
+        
+        let debounceTimer;
+        function debouncedSyncAll() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                syncSettings({
+                    threshold: parseFloat(thresholdInput.value),
+                    limit: parseInt(limitInput.value),
+                    sampling_size: parseInt(samplingInput.value),
+                    model_type: modelTypeInput.value
+                });
+            }, 400); // Wait 400ms after last keystroke to save
+        }
+        
+        thresholdInput.oninput = debouncedSyncAll;
+        limitInput.oninput = debouncedSyncAll;
+        samplingInput.oninput = debouncedSyncAll;
+        modelTypeInput.onchange = debouncedSyncAll;
+
         const explorerOverlay = document.getElementById('explorer-overlay');
         const explorerGrid = document.getElementById('explorer-grid');
         const explorerSearch = document.getElementById('explorer-search');
@@ -414,6 +475,114 @@
         const captionList = document.getElementById('caption-list');
 
         let currentResults = [];
+        let activeSessionId = "";
+
+        // Init Sessions
+        loadSessions();
+
+        async function loadSessions() {
+            try {
+                const res = await fetch('/api/sessions');
+                const data = await res.json();
+                const sel = document.getElementById('session_select');
+                sel.innerHTML = '<option value="">-- Select a Session --</option>';
+                
+                if (data.sessions && data.sessions.length > 0) {
+                    data.sessions.forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s.id;
+                        opt.textContent = `${s.name} (${new Date(s.created_at).toLocaleDateString()})`;
+                        sel.appendChild(opt);
+                    });
+                    
+                    // Auto select last active or first
+                    if (activeSessionId) {
+                        sel.value = activeSessionId;
+                    } else if (data.sessions.length > 0) {
+                        sel.value = data.sessions[0].id;
+                        switchSession();
+                    }
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function createNewSession() {
+            const name = prompt("Enter a name for the new session:");
+            if (!name) return;
+            try {
+                const res = await fetch('/api/sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const data = await res.json();
+                if (data.id) {
+                    activeSessionId = data.id;
+                    await loadSessions();
+                    switchSession();
+                }
+            } catch (e) { alert("Error creating session"); }
+        }
+
+        async function switchSession() {
+            const sid = document.getElementById('session_select').value;
+            if (!sid) return;
+            try {
+                const res = await fetch(`/api/sessions/${sid}/activate`, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === "success") {
+                    activeSessionId = sid;
+                    modelTypeInput.value = data.meta.model_type || 'clip';
+                    if (data.meta.last_query) promptArea.value = data.meta.last_query;
+                    if (data.meta.threshold) thresholdInput.value = data.meta.threshold;
+                    if (data.meta.limit) limitInput.value = data.meta.limit;
+                    if (data.meta.sampling_size) samplingInput.value = data.meta.sampling_size;
+                    
+                    const uploads = (data.meta.stats && data.meta.stats.uploaded_folders) ? data.meta.stats.uploaded_folders : 0;
+                    queryPoolIndicator.innerText = `Videos Uploaded: ${uploads}`;
+                    
+                    if (data.report) {
+                        renderSummaryReport(data.report);
+                        reportCard.style.display = 'block';
+                    } else {
+                        reportCard.style.display = 'none';
+                    }
+                    
+                    if (data.results && data.results.length > 0) {
+                        currentResults = data.results;
+                        renderResults(data.results);
+                    } else {
+                        currentResults = [];
+                        resultsArea.innerHTML = '<p style="color: #64748B;">Session activated. Run crawler or upload samples to see data.</p>';
+                    }
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        async function deleteSession() {
+            const sid = document.getElementById('session_select').value;
+            if (!sid) return;
+            if (!confirm("Are you sure you want to delete this session and ALL its data?")) return;
+            try {
+                await fetch(`/api/sessions/${sid}`, { method: 'DELETE' });
+                activeSessionId = "";
+                await loadSessions();
+            } catch (e) { alert("Error deleting session"); }
+        }
+        
+        async function regenerateEmbeddings() {
+            const sid = document.getElementById('session_select').value;
+            if (!sid) { alert("Please select a session first."); return; }
+            if (!confirm(`Regenerate embeddings for '${sid}' using ${modelTypeInput.value}?`)) return;
+            
+            try {
+                await fetch(`/api/sessions/${sid}/regenerate_embeddings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_type: modelTypeInput.value })
+                });
+            } catch (e) { alert("Error starting regeneration."); }
+        }
 
         socket.on('connect', () => {
             document.getElementById('connection-status').innerHTML = '<i class="fas fa-circle" style="color: #10B981;"></i> Connected';
@@ -421,13 +590,35 @@
 
         // Pipeline Updates via SocketIO
         socket.on('pipeline_update', (data) => {
+            if (data.session_id && data.session_id !== activeSessionId) return; // Prevent cross-session crosstalk
+
             statusMsg.innerText = `[${data.status.toUpperCase()}] ${data.msg}`;
 
             if (data.status !== 'idle') {
                 progressWrapper.style.display = 'block';
                 progressBar.style.width = data.progress + '%';
+                btnStart.disabled = true;
+                btnResume.disabled = true;
+                btnGenPrompt.disabled = true;
+                btnUploadQuery.disabled = true;
+                btnResamplePool.disabled = true;
+                btnRegenEmbeddings.disabled = true;
+                if (folderInput) folderInput.disabled = true;
             } else {
                 progressWrapper.style.display = 'none';
+                btnStart.disabled = false;
+                btnResume.disabled = false;
+                btnGenPrompt.disabled = false;
+                btnUploadQuery.disabled = false;
+                btnResamplePool.disabled = false;
+                btnRegenEmbeddings.disabled = false;
+                if (folderInput) folderInput.disabled = false;
+            }
+
+            if (data.report) {
+                thresholdInput.value = data.report.recommended_threshold;
+                renderSummaryReport(data.report);
+                reportCard.style.display = 'block';
             }
 
             if (data.results && data.results.length > 0) {
@@ -436,14 +627,18 @@
             }
         });
 
-        // Folder Upload & Auto-Process (XHR for progress)
         folderInput.onchange = () => {
+            if (!activeSessionId) {
+                alert("Please select or create a Session first!");
+                return;
+            }
             const files = folderInput.files;
             if (!files.length) return;
 
             const formData = new FormData();
             formData.append('sampling_size', samplingInput.value);
             formData.append('model_type', modelTypeInput.value);
+            formData.append('session_id', activeSessionId);
             for (let file of files) {
                 formData.append('files', file, file.webkitRelativePath || file.name);
             }
@@ -486,13 +681,38 @@
             xhr.send(formData);
         };
 
+        async function resamplePool() {
+            if (!activeSessionId) return alert("Select a session.");
+            try {
+                resultsArea.innerHTML = '<p>Resampling query pool...</p>';
+                const res = await fetch('/api/resample_queries', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        session_id: activeSessionId,
+                        sampling_size: samplingInput.value,
+                        model_type: modelTypeInput.value
+                    })
+                });
+                const data = await res.json();
+                if (data.error) alert(data.error);
+            } catch (e) { console.error(e); }
+        }
+
         function renderSummaryReport(report) {
-            const { thumbnails, max_sim, min_sim, mean_sim, recommended_threshold } = report;
+            const { thumbnails, max_sim, min_sim, mean_sim, recommended_threshold, model_type } = report;
+            const modelName = model_type === 'siglip' ? 'SigLIP' : model_type === 'openclip' ? 'OpenCLIP' : 'CLIP';
+            
             let html = `
                 <div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 10px; border: 1px solid var(--glass-border);">
-                    <p style="margin-bottom: 0.8rem; color: var(--accent); font-weight: bold; font-size: 0.9rem;">
-                        <i class="fas fa-microchip"></i> Concept Analysis
-                    </p>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem;">
+                        <p style="margin: 0; color: var(--accent); font-weight: bold; font-size: 0.9rem;">
+                            <i class="fas fa-microchip"></i> Concept Analysis
+                        </p>
+                        <span style="font-size: 0.75rem; font-weight: bold; background: rgba(16, 185, 129, 0.15); padding: 0.3rem 0.6rem; border-radius: 6px; color: #10B981; border: 1px solid rgba(16, 185, 129, 0.3);">
+                            <i class="fas fa-brain"></i> Model: ${modelName}
+                        </span>
+                    </div>
                     <ul style="list-style: none; font-size: 0.8rem; line-height: 1.6; margin-bottom: 1rem;">
                         <li style="display: flex; justify-content: space-between;"><span>Max Sim:</span> <b>${max_sim.toFixed(3)}</b></li>
                         <li style="display: flex; justify-content: space-between;"><span>Min Sim:</span> <b>${min_sim.toFixed(3)}</b></li>
@@ -542,11 +762,16 @@
 
         // Generate AI Search Prompt
         btnGenPrompt.onclick = async () => {
+            if (!activeSessionId) return alert("Select a session.");
             btnGenPrompt.disabled = true;
             btnGenPrompt.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
             
             try {
-                const resp = await fetch('/api/generate_search_prompt', { method: 'POST' });
+                const resp = await fetch('/api/generate_search_prompt', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: activeSessionId })
+                });
                 const data = await resp.json();
                 
                 if (data.candidates && data.candidates.length > 0) {
@@ -590,7 +815,9 @@
 
         // Search & Launch
         btnStart.onclick = async () => {
+            if (!activeSessionId) return alert("Please select or create a Session first!");
             const body = {
+                session_id: activeSessionId,
                 query: promptArea.value,
                 limit: parseInt(limitInput.value),
                 threshold: parseFloat(thresholdInput.value),
@@ -598,6 +825,22 @@
             };
             resultsArea.innerHTML = '<p>Initiating crawler pipeline...</p>';
             await fetch('/api/start_crawl', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+        };
+
+        // Resume Unprocessed
+        btnResume.onclick = async () => {
+            if (!activeSessionId) return alert("Please select or create a Session first!");
+            const body = {
+                session_id: activeSessionId,
+                threshold: parseFloat(thresholdInput.value),
+                fps: 2.0 // Default or hidden
+            };
+            resultsArea.innerHTML = '<p>Initiating resume pipeline for unprocessed videos...</p>';
+            await fetch('/api/resume_crawl', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)

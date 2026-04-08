@@ -7,6 +7,7 @@ Used by app.py and CLI tools.
 
 import cv2
 import torch
+import json
 import numpy as np
 import os
 import shutil
@@ -29,6 +30,17 @@ def load_model(device, model_type="clip"):
     global _LOADED_MODEL
     if _LOADED_MODEL["type"] == model_type and _LOADED_MODEL["model"] is not None:
         return _LOADED_MODEL["model"], _LOADED_MODEL["processor"]
+
+    # Prevent Memory leak on model switch
+    if _LOADED_MODEL["model"] is not None:
+        print(f"Unloading previous model: {_LOADED_MODEL['type']}")
+        del _LOADED_MODEL["model"]
+        del _LOADED_MODEL["processor"]
+        _LOADED_MODEL = {"type": None, "model": None, "processor": None}
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     print(f"Loading model: {model_type} on {device}...")
     if model_type == "siglip":
@@ -89,6 +101,16 @@ def generate_concepts_from_images(pil_images, model, processor, device):
         txt_inputs = tok(text=labels, padding=True, return_tensors="pt").to(device)
         with torch.no_grad():
             text_feats = model.get_text_features(**txt_inputs)
+            # Unwrap HuggingFace Dataclasses if returned
+            if hasattr(text_feats, 'text_embeds'):
+                text_feats = text_feats.text_embeds
+            elif hasattr(text_feats, 'pooler_output'):
+                text_feats = text_feats.pooler_output
+            elif isinstance(text_feats, tuple):
+                text_feats = text_feats[0]
+            elif isinstance(text_feats, dict) and 'pooler_output' in text_feats:
+                text_feats = text_feats['pooler_output']
+                
             text_feats = text_feats / text_feats.norm(p=2, dim=-1, keepdim=True)
         
         # 2. Get Image Features (Reuse our robust embedder)
@@ -103,7 +125,7 @@ def generate_concepts_from_images(pil_images, model, processor, device):
         # 3. Match
         # (1, D) @ (N_labels, D).T -> (1, N_labels)
         logits = (img_feats_torch @ text_feats.T).cpu().numpy()[0]
-        idxs = np.argsort(logits)[-5:][::-1]
+        idxs = np.argsort(logits)[-3:][::-1]
         return [labels[i] for i in idxs]
         
     except Exception as e:
@@ -182,68 +204,163 @@ def embed_folder_images(folder_paths, model, processor, device, batch_size=32):
     emb_matrix = np.vstack(all_embs)
     return emb_matrix, folder_map
 
-def get_confusion_matrix_data(query_root_path, model, processor, device):
+def save_embeddings(session_path, emb_matrix, folder_map):
+    """Save embeddings and folder map to the session's embeddings folder."""
+    emb_dir = Path(session_path) / "embeddings"
+    emb_dir.mkdir(parents=True, exist_ok=True)
+    
+    np.save(emb_dir / "query_matrix.npy", emb_matrix)
+    with open(emb_dir / "folder_map.json", "w", encoding="utf-8") as f:
+        json.dump(folder_map, f)
+
+def load_embeddings(session_path):
+    """Load embeddings and folder map from the session's embeddings folder. Returns None, None if missing."""
+    emb_dir = Path(session_path) / "embeddings"
+    mat_file = emb_dir / "query_matrix.npy"
+    map_file = emb_dir / "folder_map.json"
+    
+    if mat_file.exists() and map_file.exists():
+        try:
+            emb_matrix = np.load(mat_file)
+            with open(map_file, "r", encoding="utf-8") as f:
+                folder_map = json.load(f)
+            return emb_matrix, folder_map
+        except Exception as e:
+            print(f"Error loading embeddings from {session_path}: {e}")
+    return None, None
+
+def compute_smart_threshold(folder_embeddings):
+    """
+    Compute a similarity threshold from intra-class vs inter-class distributions.
+
+    Places the threshold in the gap between:
+      - inter_p90: 90th percentile of between-folder similarities
+      - intra_p10: 10th percentile of within-folder similarities
+
+    If classes are separable (gap > 0.02): threshold = inter_p90 + 0.3 * gap
+    If classes overlap: threshold = 95th percentile of inter-class similarities
+
+    Args:
+        folder_embeddings: {folder_name: np.ndarray of shape (N, D)}
+
+    Returns:
+        (threshold: float, diagnostics: dict)
+    """
+    names = list(folder_embeddings.keys())
+    if len(names) < 2:
+        return 0.85, {"method": "default", "reason": "only one class"}
+
+    intra_sims = []
+    for embs in folder_embeddings.values():
+        if len(embs) > 1:
+            sims = cosine_similarity(embs, embs)
+            mask = ~np.eye(len(embs), dtype=bool)
+            intra_sims.extend(sims[mask].tolist())
+
+    inter_sims = []
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            sims = cosine_similarity(folder_embeddings[names[i]], folder_embeddings[names[j]])
+            inter_sims.extend(sims.flatten().tolist())
+
+    if not inter_sims:
+        return 0.85, {"method": "default", "reason": "insufficient data"}
+
+    inter_p90 = float(np.percentile(inter_sims, 90))
+    inter_mean = float(np.mean(inter_sims))
+
+    if intra_sims:
+        intra_p10 = float(np.percentile(intra_sims, 10))
+        intra_mean = float(np.mean(intra_sims))
+        gap = intra_p10 - inter_p90
+        if gap > 0.02:
+            threshold = inter_p90 + 0.30 * gap
+            method = "gap"
+        else:
+            threshold = float(np.percentile(inter_sims, 95))
+            method = "overlap"
+    else:
+        intra_p10 = intra_mean = gap = None
+        threshold = inter_p90 + 0.05
+        method = "inter_only"
+
+    threshold = float(np.clip(threshold, 0.70, 0.97))
+    return round(threshold, 3), {
+        "method": method,
+        "inter_p90": round(inter_p90, 3),
+        "inter_mean": round(inter_mean, 3),
+        "intra_p10": round(intra_p10, 3) if intra_p10 is not None else None,
+        "intra_mean": round(intra_mean, 3) if intra_mean is not None else None,
+        "gap": round(gap, 3) if gap is not None else None,
+    }
+
+
+def get_confusion_matrix_data(query_root_path, model, processor, device, model_type="clip", preview_dir_path="static/query_previews", preview_url_pref="/static/query_previews"):
     """Calculate pairwise folder similarity and return structured data for UI."""
     folders = sorted([f for f in Path(query_root_path).iterdir() if f.is_dir()])
     if not folders:
         return None
-    
-    names, mean_embs = [], []
+
+    names = []
+    mean_embs = []
+    folder_embeddings = {}   # per-image embeddings for smart threshold
+
     for f in folders:
         imgs = load_folder_images(f)
         if imgs:
             emb = _embed_batch(imgs, model, processor, device)
+            folder_embeddings[f.name] = emb
             mean_embs.append(emb.mean(axis=0, keepdims=True))
             names.append(f.name)
-            
+
     if not names:
         return None
-        
+
     mat = np.vstack(mean_embs)
     sims = cosine_similarity(mat, mat)
-    
+
     off_diag = sims[~np.eye(len(names), dtype=bool)]
     if off_diag.size == 0:
         return {
             "names": names,
-            "max_sim": 1.0,
-            "min_sim": 1.0,
-            "mean_sim": 1.0,
-            "recommended_threshold": 0.85
+            "max_sim": 1.0, "min_sim": 1.0, "mean_sim": 1.0,
+            "recommended_threshold": 0.85,
+            "threshold_diagnostics": {"method": "default", "reason": "single folder"},
         }
-        
+
     max_sim = float(off_diag.max())
     min_sim = float(off_diag.min())
     mean_sim = float(off_diag.mean())
-    recommended = min(0.98, round(mean_sim, 2))
-    
-    # NEW: Identify 'distinct' folders based on similarity
-    distinct_names = []
-    distinct_indices = []
+
+    # Smart threshold from intra/inter-class distributions
+    recommended, threshold_diagnostics = compute_smart_threshold(folder_embeddings)
+
+    # Identify distinct folders and build previews
+    distinct_names, distinct_indices = [], []
+    thumbnails = []
+    preview_dir = Path(preview_dir_path)
+    if preview_dir.exists():
+        shutil.rmtree(preview_dir)
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
     for i, name in enumerate(names):
-        is_distinct = True
-        for prev_idx in distinct_indices:
-            if sims[i, prev_idx] > recommended:
-                is_distinct = False
-                break
+        is_distinct = all(sims[i, prev_idx] <= recommended for prev_idx in distinct_indices)
         if is_distinct:
             distinct_names.append(name)
             distinct_indices.append(i)
-    
-    # Generate Global Detected Trends from ALL images
+
     all_all_imgs = []
     for name in distinct_names:
-        all_all_imgs.extend(load_folder_images(Path("query_images") / name))
-    
+        all_all_imgs.extend(load_folder_images(Path(query_root_path) / name))
     trends = generate_concepts_from_images(all_all_imgs, model, processor, device) if all_all_imgs else []
 
     for name in distinct_names:
-        folder_path = Path("query_images") / name
+        folder_path = Path(query_root_path) / name
         imgs = sorted(list(folder_path.glob("*.jpg")))
         if imgs:
             dest = preview_dir / f"{name}.jpg"
             shutil.copy(imgs[0], dest)
-            thumbnails.append(f"/static/query_previews/{name}.jpg")
+            thumbnails.append(f"{preview_url_pref}/{name}.jpg")
 
     return {
         "names": names,
@@ -252,10 +369,12 @@ def get_confusion_matrix_data(query_root_path, model, processor, device):
         "min_sim": min_sim,
         "mean_sim": mean_sim,
         "recommended_threshold": recommended,
+        "threshold_diagnostics": threshold_diagnostics,
         "thumbnails": thumbnails,
-        "concepts": [], # Removed per user 
-        "trends": trends, # Global summary
-        "distinct_names": distinct_names
+        "concepts": [],
+        "trends": trends,
+        "distinct_names": distinct_names,
+        "model_type": model_type,
     }
 
 # ─────────────────────────────────────────────────────────────────────────────

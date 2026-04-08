@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 import yt_dlp
 
-def download_video(url, output_dir):
+def download_video(url, output_dir, archive_path=None):
     """Download a single video using yt-dlp."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -24,14 +24,20 @@ def download_video(url, output_dir):
     outtmpl = str(output_dir / "%(id)s.%(ext)s")
 
     ydl_opts = {
-        "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+        "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
         "outtmpl": outtmpl,
         "merge_output_format": "mp4",
         "quiet": False,
         "no_warnings": False,
         "ignoreerrors": True,
         "restrictfilenames": True, # Clean filenames for Windows/FileSystem reliability
+        # --- POWER USER / STEALTH SETTINGS ---
+        "sleep_interval": 3,
+        "max_sleep_interval": 8,
     }
+    
+    if archive_path:
+        ydl_opts["download_archive"] = str(archive_path)
 
     print(f"\nStarting download: {url}")
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:

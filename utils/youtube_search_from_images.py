@@ -66,15 +66,6 @@ CANDIDATE_CONCEPTS = [
     "vlog", "review", "interview", "live stream",
 ]
 
-# Prompt templates applied to each concept; scores are averaged
-PROMPT_TEMPLATES = [
-    "a photo of {}",
-    "a video frame showing {}",
-    "a scene with {}",
-    "footage of {}",
-]
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -157,14 +148,17 @@ def generate_query_from_images(images, model, processor, device, label="images",
     image_emb = embed_images(images, model, processor, device)       # (N, D)
     mean_image_emb = image_emb.mean(axis=0, keepdims=True)           # (1, D)
 
-    # Average text embeddings across all prompt templates for each concept
+    # Calculate zero-shot overlap directly without template engineering
+    text_emb = embed_texts(CANDIDATE_CONCEPTS, model, processor, device)
+    scores = (mean_image_emb @ text_emb.T).squeeze()
+    
     concept_scores = []
-    for concept in CANDIDATE_CONCEPTS:
-        prompts = [t.format(concept) for t in PROMPT_TEMPLATES]
-        text_emb = embed_texts(prompts, model, processor, device)    # (4, D)
-        mean_text_emb = text_emb.mean(axis=0, keepdims=True)         # (1, D)
-        score = float((mean_image_emb @ mean_text_emb.T).squeeze())
-        concept_scores.append((score, concept))
+    # Handle edge case where only 1 concept exists
+    if len(CANDIDATE_CONCEPTS) == 1:
+        scores = [scores]
+        
+    for i, concept in enumerate(CANDIDATE_CONCEPTS):
+        concept_scores.append((float(scores[i]), concept))
 
     concept_scores.sort(reverse=True)
     top_concepts = [c for _, c in concept_scores[:top_k]]
@@ -175,21 +169,25 @@ def generate_query_from_images(images, model, processor, device, label="images",
     return query, concept_scores
 
 
-def search_youtube(query, max_results=10):
-    """Use yt-dlp to search YouTube and return top results."""
-    print(f"\nSearching YouTube for: \"{query}\" ...")
+def search_youtube(query, max_results=50):
+    """
+    Search YouTube and return up to max_results unique video metadata dicts.
+    Fetches (max_results * 2 + 50) candidates so there is a buffer after
+    deduplication by video ID.
+    """
+    fetch_n = max(max_results * 2 + 50, 100)
+    print(f"\nSearching YouTube for: \"{query}\" (fetching up to {fetch_n} candidates)...")
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
-        "extract_flat": True,               # Don't download, just get metadata
+        "extract_flat": True,
         "skip_download": True,
         "ignoreerrors": True,
     }
 
-    # Use a fixed high search count (e.g. 50) to ensure we find enough unique results
-    search_url = f"ytsearch50:{query}"
+    search_url = f"ytsearch{fetch_n}:{query}"
     results = []
-    seen_urls = set()
+    seen_ids = set()
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(search_url, download=False)
@@ -197,32 +195,64 @@ def search_youtube(query, max_results=10):
             for entry in info["entries"]:
                 if entry is None:
                     continue
-                
-                vid_id  = entry.get("id", "")
-                url     = entry.get("url") or entry.get("webpage_url") or f"https://www.youtube.com/watch?v={vid_id}"
-                
-                if url in seen_urls:
-                    continue
-                seen_urls.add(url)
 
-                title   = entry.get("title", "N/A")
-                channel = entry.get("uploader") or entry.get("channel", "N/A")
-                duration = entry.get("duration")
-                views   = entry.get("view_count")
+                vid_id = entry.get("id", "")
+                if not vid_id or vid_id in seen_ids:
+                    continue
+                seen_ids.add(vid_id)
+
+                url = (
+                    entry.get("webpage_url")
+                    or entry.get("url")
+                    or f"https://www.youtube.com/watch?v={vid_id}"
+                )
 
                 results.append({
-                    "title":    title,
-                    "channel":  channel,
-                    "duration": duration,
-                    "views":    views,
+                    "id":       vid_id,
+                    "title":    entry.get("title", "N/A"),
+                    "channel":  entry.get("uploader") or entry.get("channel", "N/A"),
+                    "duration": entry.get("duration"),
+                    "views":    entry.get("view_count"),
                     "url":      url,
                 })
 
                 if len(results) >= max_results:
                     break
-    
+
     print(f"  Found {len(results)} unique results.")
     return results
+
+
+def search_youtube_multi(queries, max_per_query=200, total_max=1000):
+    """
+    Search YouTube with multiple queries and return a deduplicated pool.
+    Results are interleaved round-robin so no single query dominates.
+    """
+    per_query_results = []
+    for q in queries:
+        results = search_youtube(q, max_results=max_per_query)
+        per_query_results.append(results)
+        print(f"  Query \"{q[:50]}\": {len(results)} results")
+
+    seen_ids = set()
+    merged = []
+    max_len = max((len(r) for r in per_query_results), default=0)
+
+    for i in range(max_len):
+        for bucket in per_query_results:
+            if i < len(bucket):
+                vid = bucket[i]
+                vid_id = vid.get("id") or vid["url"]
+                if vid_id not in seen_ids:
+                    seen_ids.add(vid_id)
+                    merged.append(vid)
+                    if len(merged) >= total_max:
+                        break
+        if len(merged) >= total_max:
+            break
+
+    print(f"\n  Total unique candidates after multi-query merge: {len(merged)}")
+    return merged
 
 
 def print_results(results):

@@ -34,10 +34,17 @@ segments/
 reports/
 static/results/
 static/query_previews/
+sessions/
 *.png
 *.jpg
 *.mp4
 *.webm
+
+# Claude Code
+.claude/worktrees/
+
+# Environment variables
+.env
 
 # IDEs
 .vscode/
