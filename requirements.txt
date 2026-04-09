@@ -10,3 +10,9 @@ tqdm
 streamlit
 sentencepiece
 protobuf
+anthropic
+openai
+python-dotenv
+flask
+flask-socketio
+yt-dlp
